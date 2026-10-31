@@ -1,0 +1,52 @@
+[package]
+name = "constellation"
+version = "0.1.0"
+description = "Constellation — Windows lyrics visualizer"
+authors = ["Yash"]
+edition = "2021"
+
+[lib]
+name = "constellation_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+thiserror = "2"
+regex = "1"
+crossbeam-channel = "0.5"
+rustfft = "6.2"
+realfft = "3.4"
+
+[dev-dependencies]
+mockito = "1.6"
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.17"
+windows = { version = "0.61", features = [
+  "Media_Control",
+  "Storage_Streams",
+  "Foundation",
+  "Foundation_Collections",
+  "Win32_System_Com",
+] }
+windows-future = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

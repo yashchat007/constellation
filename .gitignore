@@ -1,0 +1,20 @@
+node_modules/
+dist/
+src-tauri/target/
+_video_frames/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+credentials.json
+
+# IDE / OS junk
+.idea/
+Thumbs.db
+.DS_Store
+
+# Installers and release bundles (under target/ when built locally)
+*.msi
+*.exe
+!src-tauri/icons/**

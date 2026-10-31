@@ -1,0 +1,444 @@
+:root {
+  --c-bg: #030303;
+  --c-accent: #b8b0a8;
+  --c-accent-dim: #6e6860;
+  --c-accent-hi: #e8e4dc;
+  --c-text: #f0ebe3;
+  --font-ui: "Manrope", "Segoe UI Variable", system-ui, sans-serif;
+  --font-display: "Space Grotesk", var(--font-ui);
+  --font-lyric: "Outfit", var(--font-ui);
+  color: var(--c-text);
+  font-family: var(--font-ui);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+body {
+  overflow: hidden;
+}
+
+.app-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(3, 3, 3, 0.96);
+  backdrop-filter: blur(20px);
+  border: 1px solid color-mix(in srgb, var(--c-accent) 18%, transparent);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.app-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mini-player {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-accent) 10%, transparent);
+  background: linear-gradient(
+    180deg,
+    rgba(12, 11, 9, 0.65) 0%,
+    rgba(3, 3, 3, 0) 100%
+  );
+}
+
+.art-wrap {
+  width: 76px;
+  height: 76px;
+}
+
+.art {
+  width: 76px;
+  height: 76px;
+  border-radius: 14px;
+  object-fit: cover;
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(229, 189, 101, 0.12),
+    0 0 32px rgba(229, 189, 101, 0.12);
+}
+
+.art-placeholder {
+  background: linear-gradient(145deg, #141210, #080808);
+  box-shadow:
+    inset 0 0 0 1px rgba(229, 189, 101, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.meta .title {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  color: var(--c-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta .artist {
+  margin-top: 3px;
+  font-size: 0.82rem;
+  color: rgba(245, 240, 229, 0.58);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta .playback-badge {
+  display: inline-block;
+  margin-top: 6px;
+  margin-right: 8px;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(245, 215, 122, 0.75);
+}
+
+.meta .playback-badge.audio-live {
+  color: rgba(120, 220, 180, 0.85);
+}
+
+.meta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pill {
+  border: 1px solid rgba(229, 189, 101, 0.32);
+  background: rgba(229, 189, 101, 0.06);
+  color: var(--c-accent);
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    background 0.22s ease,
+    border-color 0.22s ease,
+    transform 0.16s ease;
+}
+
+.pill:hover {
+  background: rgba(229, 189, 101, 0.12);
+  transform: translateY(-1px);
+}
+
+.pill.active {
+  background: rgba(229, 189, 101, 0.18);
+  border-color: rgba(245, 215, 122, 0.45);
+  color: var(--c-accent-hi);
+}
+
+.pill.ghost {
+  border-color: rgba(245, 240, 229, 0.14);
+  color: rgba(245, 240, 229, 0.72);
+  background: transparent;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 2px;
+}
+
+.transport button {
+  border: none;
+  background: rgba(245, 240, 229, 0.05);
+  color: var(--c-text);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    transform 0.15s ease;
+}
+
+.transport button:hover {
+  background: rgba(245, 240, 229, 0.12);
+  transform: scale(1.05);
+}
+
+.transport .play {
+  width: 44px;
+  height: 44px;
+  background: rgba(229, 189, 101, 0.14);
+  color: var(--c-accent-hi);
+  box-shadow: 0 0 24px rgba(229, 189, 101, 0.12);
+}
+
+.constellation-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.constellation-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  touch-action: none;
+  background: transparent;
+}
+
+.constellation-empty {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  color: rgba(245, 240, 229, 0.48);
+  font-size: 0.9rem;
+}
+
+.lyrics-status {
+  padding: 8px 16px;
+  font-size: 0.78rem;
+  color: rgba(245, 215, 122, 0.85);
+  border-bottom: 1px solid rgba(229, 189, 101, 0.06);
+}
+
+.lyrics-status-loading {
+  color: rgba(245, 240, 229, 0.55);
+  font-style: italic;
+}
+
+.lyrics-status-warn {
+  color: rgba(229, 189, 101, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lyrics-retry {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 20;
+}
+
+.settings-panel {
+  width: min(360px, calc(100vw - 32px));
+  background: rgba(8, 8, 8, 0.97);
+  border: 1px solid rgba(229, 189, 101, 0.18);
+  border-radius: 16px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.settings-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.settings-section {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--c-accent);
+}
+
+.settings-hint {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(245, 240, 229, 0.52);
+  margin: 0 0 12px;
+}
+
+.settings-save-status {
+  margin: 10px 0 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(245, 240, 229, 0.45);
+}
+
+.settings-save-error {
+  color: rgba(255, 140, 120, 0.85);
+}
+
+.settings-panel label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: rgba(245, 240, 229, 0.82);
+}
+
+.settings-panel label.checkbox {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.settings-panel select {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(229, 189, 101, 0.15);
+  color: var(--c-text);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.settings-actions button {
+  border-radius: 10px;
+  border: 1px solid rgba(245, 240, 229, 0.12);
+  background: transparent;
+  color: var(--c-text);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.settings-actions .primary {
+  border-color: rgba(229, 189, 101, 0.4);
+  background: rgba(229, 189, 101, 0.14);
+  color: var(--c-accent-hi);
+}
+
+.lyrics-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 26px 30px;
+  background: var(--c-bg);
+  scroll-behavior: smooth;
+}
+
+.lyrics-preview-empty {
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+  color: rgba(245, 240, 229, 0.48);
+  font-size: 0.9rem;
+}
+
+.lyrics-line {
+  padding: 8px 4px;
+  font-size: 1.05rem;
+  line-height: 1.5;
+  color: rgba(245, 240, 229, 0.42);
+  transition:
+    color 0.3s ease,
+    opacity 0.3s ease;
+}
+
+.lyrics-line-past {
+  opacity: 0.62;
+  color: rgba(229, 189, 101, 0.45);
+}
+
+.lyrics-line-upcoming {
+  opacity: 0.78;
+}
+
+.lyrics-line-active {
+  color: var(--c-accent-hi);
+  font-weight: 600;
+  font-size: 1.18rem;
+  text-shadow: 0 0 22px rgba(229, 189, 101, 0.22);
+}
+
+.dev-diag-toggle {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  z-index: 9999;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.75);
+  color: #ccc;
+  cursor: pointer;
+}
+
+.dev-diag-panel {
+  position: fixed;
+  right: 8px;
+  bottom: 36px;
+  z-index: 9999;
+  width: min(320px, 92vw);
+  max-height: 70vh;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 8, 10, 0.92);
+  font-size: 11px;
+  color: #ddd;
+}
+
+.dev-diag-panel h3 {
+  margin: 8px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #aaa;
+}
+
+.dev-diag-panel dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+  margin: 0;
+}
+
+.dev-diag-panel dt {
+  opacity: 0.65;
+}
+
+.dev-diag-panel dd {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
