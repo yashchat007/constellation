@@ -18,3 +18,6 @@ Thumbs.db
 *.msi
 *.exe
 !src-tauri/icons/**
+
+# Local provider probe output (regenerate with scripts/benchmark-lyrics-providers.ps1)
+benchmark-probe-output.csv

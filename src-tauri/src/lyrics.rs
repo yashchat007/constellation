@@ -225,6 +225,18 @@ pub struct LyricsFetchDiagnostics {
     pub get_attempts: u32,
     #[serde(default)]
     pub last_rejection_reason: String,
+    #[serde(default)]
+    pub current_provider: String,
+    #[serde(default)]
+    pub final_provider: String,
+    #[serde(default)]
+    pub fallback_reason: String,
+    #[serde(default)]
+    pub lyrics_format: String,
+    #[serde(default)]
+    pub timing_quality: String,
+    #[serde(default)]
+    pub provider_query_ms: u64,
 }
 
 static LAST_LYRICS_DIAG: Mutex<Option<LyricsFetchDiagnostics>> = Mutex::new(None);
@@ -252,7 +264,7 @@ fn ensure_fetch_active(request_id: u64) -> Result<(), LyricsError> {
     }
 }
 
-fn poll_fetch_lifecycle(request_id: u64, deadline: Instant) -> Result<(), LyricsError> {
+pub(crate) fn poll_fetch_lifecycle(request_id: u64, deadline: Instant) -> Result<(), LyricsError> {
     ensure_fetch_active(request_id)?;
     if Instant::now() >= deadline {
         return Err(LyricsError::Transient(
@@ -336,6 +348,7 @@ pub fn pipe_credit_names(title: &str) -> Vec<String> {
     title
         .split('|')
         .skip(1)
+        .filter(|seg| !is_non_performer_pipe_segment(seg))
         .flat_map(|seg| seg.split(&[',', '&'][..]))
         .map(|s| s.trim())
         .filter(|s| {
@@ -344,47 +357,85 @@ pub fn pipe_credit_names(title: &str) -> Vec<String> {
                 && len <= 48
                 && !s.eq_ignore_ascii_case("brahmastra")
                 && !s.eq_ignore_ascii_case("film")
+                && !is_non_performer_pipe_segment(s)
         })
         .map(|s| s.to_string())
         .collect()
 }
 
-fn expand_playback_credit(name: &str) -> Vec<String> {
-    let n = name.trim();
-    if n.is_empty() {
-        return Vec::new();
+/// Segments like `Music By Mithoon` or cast lists — not performing artists.
+pub fn is_non_performer_pipe_segment(seg: &str) -> bool {
+    let s = seg.trim().to_lowercase();
+    if s.is_empty() {
+        return true;
     }
-    let lower = n.to_lowercase();
-    let mut out = vec![n.to_string()];
-    match lower.as_str() {
-        "arijit" => out.push("Arijit Singh".into()),
-        "amitabh" => out.push("Amitabh Bhattacharya".into()),
-        "pritam" => out.push("Pritam".into()),
-        "alia" | "ranbir" => {}
-        _ => {}
-    }
-    out.sort();
-    out.dedup();
-    out
+    s.contains("music by")
+        || s.contains("lyrics by")
+        || s.contains("director")
+        || s.contains("starring")
+        || s.contains("present")
+        || s.contains("official")
+        || s.contains("video")
+        || s.contains("tips ")
+        || s.starts_with("music ")
 }
 
-pub fn clean_video_title(title: &str) -> String {
-    let head = extract_primary_streaming_head(title);
-    let head = strip_streaming_version_suffix(&head);
-    let primary = primary_song_title_from_head(&head);
-    static NOISE: &[&str] = &[
-        "official video",
+/// YouTube head `Tum Hi Ho Song Aashiqui 2` → (`Tum Hi Ho`, Some(`Aashiqui 2`)).
+pub fn extract_song_title_and_album_from_head(head: &str) -> (String, Option<String>) {
+    let head = head.trim();
+    if head.is_empty() {
+        return (String::new(), None);
+    }
+    static SONG_ALBUM: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^(.+?)\s+song\s+(.+)$").expect("song album re"));
+    if let Some(cap) = SONG_ALBUM.captures(head) {
+        let title = cap[1].trim().to_string();
+        let album = cap[2].trim().to_string();
+        if !title.is_empty() && !album.is_empty() {
+            return (title, Some(album));
+        }
+    }
+    (
+        canonical_song_title_from_youtube_head(head),
+        None,
+    )
+}
+
+/// Strip `8K/4K Music Video` and similar prefixes down to the song name (`Kesariya`).
+pub fn canonical_song_title_from_youtube_head(head: &str) -> String {
+    let mut s = strip_streaming_version_suffix(head.trim());
+    static QUALITY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\s*(?:\d+\s*k\s*(?:/\s*\d+\s*k)?|\d+k/\d+k)\s*").expect("quality re")
+    });
+    s = QUALITY.replace_all(&s, " ").to_string();
+    static TRAILING: &[&str] = &[
         "official music video",
-        "official audio",
-        "official lyric video",
+        "official video",
+        "music video",
+        "video song",
+        "audio song",
+        "lyric video",
         "lyrics video",
-        "lyrics",
-        "official",
-        "hd",
-        "4k",
-        "8k",
-        "vevo",
+        "official audio",
+        "full video",
+        "8k video",
+        "4k video",
     ];
+    let mut lower = s.to_lowercase();
+    for _ in 0..4 {
+        let mut changed = false;
+        for noise in TRAILING {
+            if lower.ends_with(noise) {
+                let cut = s.len().saturating_sub(noise.len());
+                s = s[..cut].trim().trim_end_matches('-').trim().to_string();
+                lower = s.to_lowercase();
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
     static PAREN_LABELS: &[&str] = &[
         "official",
         "official video",
@@ -400,7 +451,6 @@ pub fn clean_video_title(title: &str) -> String {
         "vevo",
     ];
     let paren_re = Regex::new(r"\s*[\(\[][^\)\]]*[\)\]]\s*").unwrap();
-    let mut s = primary.clone();
     for _ in 0..4 {
         let next = paren_re.replace_all(&s, |caps: &regex::Captures| {
             let inner = caps
@@ -425,22 +475,156 @@ pub fn clean_video_title(title: &str) -> String {
             break;
         }
         s = next.into_owned();
+        lower = s.to_lowercase();
     }
-    let re = Regex::new(r"\s*[\(\[][^\)\]]*[\)\]]\s*").unwrap();
-    s = re.replace_all(&s, " ").to_string();
     s = Regex::new(r"\s+")
         .unwrap()
         .replace_all(&s, " ")
         .trim()
         .to_string();
-    let lower = s.to_lowercase();
-    for noise in NOISE {
-        if lower.ends_with(noise) {
-            let cut = s.len().saturating_sub(noise.len());
-            s = s[..cut].trim().to_string();
+    primary_song_title_from_head(&s)
+}
+
+fn is_likely_playback_vocalist(name: &str) -> bool {
+    let n = name.trim();
+    if n.is_empty() || is_non_performer_pipe_segment(n) {
+        return false;
+    }
+    let lower = n.to_lowercase();
+    if lower.contains("kapoor")
+        || lower.contains("kapur")
+        || lower.contains("bhatt")
+        || lower == "pritam"
+        || lower == "mithoon"
+        || lower.contains("amitabh")
+    {
+        return false;
+    }
+    if lower.contains("singh")
+        || lower.contains("nautiyal")
+        || lower.contains("kaur")
+        || lower.contains("shreya")
+        || lower.contains("arijit")
+        || lower.contains("jubin")
+        || lower.contains("asees")
+    {
+        return true;
+    }
+    false
+}
+
+/// Prefer `Arijit Singh` from `| Arijit Singh | Ranbir Kapoor | …` when SMTC artist is a label channel.
+pub fn infer_vocalist_from_pipe(raw_title: &str) -> Option<String> {
+    for seg in raw_title.split('|').skip(1) {
+        for name in seg.split(&[',', '&'][..]) {
+            let name = name.trim();
+            if !is_likely_playback_vocalist(name) {
+                continue;
+            }
+            if name.eq_ignore_ascii_case("arijit") {
+                return Some("Arijit Singh".into());
+            }
+            return Some(name.to_string());
         }
     }
-    s.trim().trim_matches('-').trim().to_string()
+    None
+}
+
+pub fn infer_album_from_pipe(raw_title: &str) -> Option<String> {
+    let segments: Vec<&str> = raw_title.split('|').skip(1).collect();
+    for seg in segments.iter().rev() {
+        let s = seg.trim();
+        if s.is_empty()
+            || is_non_performer_pipe_segment(s)
+            || is_likely_playback_vocalist(s)
+        {
+            continue;
+        }
+        let lower = s.to_lowercase();
+        if lower.contains("singh") || lower.contains("kapoor") || lower.contains("pritam") {
+            continue;
+        }
+        if s.len() >= 3 && s.len() <= 48 {
+            return Some(s.to_string());
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedTrackMetadata {
+    pub artist: String,
+    pub title: String,
+    pub canonical_title: String,
+    pub album: String,
+    pub raw_artist: String,
+    pub raw_title: String,
+}
+
+/// Normalize SMTC/YouTube metadata into search fields (title, album, artist).
+pub fn resolve_track_metadata(
+    raw_artist: &str,
+    raw_title: &str,
+    smtc_album: &str,
+) -> ResolvedTrackMetadata {
+    let head = extract_primary_streaming_head(raw_title);
+    let (pattern_title, album_from_title) = extract_song_title_and_album_from_head(&head);
+    let (mut artist, mut title) = resolve_lrclib_metadata(raw_artist, raw_title);
+    if artist.is_empty() || is_untrusted_media_artist(raw_artist) {
+        if let Some(vocalist) = infer_vocalist_from_pipe(raw_title) {
+            artist = vocalist;
+        }
+    }
+    let mut canonical_title = pattern_title.clone();
+    if !pattern_title.is_empty()
+        && (title.is_empty()
+            || title.len() > pattern_title.len()
+            || similarity(&title, &pattern_title) >= 0.45)
+    {
+        title = pattern_title.clone();
+    }
+    if canonical_title.is_empty() {
+        canonical_title = title.clone();
+    }
+    let album = if !smtc_album.trim().is_empty() {
+        smtc_album.trim().to_string()
+    } else if let Some(a) = album_from_title {
+        a
+    } else {
+        infer_album_from_pipe(raw_title).unwrap_or_default()
+    };
+    ResolvedTrackMetadata {
+        artist,
+        title,
+        canonical_title,
+        album,
+        raw_artist: raw_artist.trim().to_string(),
+        raw_title: raw_title.trim().to_string(),
+    }
+}
+
+fn expand_playback_credit(name: &str) -> Vec<String> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Vec::new();
+    }
+    let lower = n.to_lowercase();
+    let mut out = vec![n.to_string()];
+    match lower.as_str() {
+        "arijit" => out.push("Arijit Singh".into()),
+        "amitabh" => out.push("Amitabh Bhattacharya".into()),
+        "pritam" => out.push("Pritam".into()),
+        "alia" | "ranbir" => {}
+        _ => {}
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+pub fn clean_video_title(title: &str) -> String {
+    let head = extract_primary_streaming_head(title);
+    canonical_song_title_from_youtube_head(&head)
 }
 
 pub fn normalize_for_match(input: &str) -> String {
@@ -485,21 +669,186 @@ pub fn similarity(a: &str, b: &str) -> f32 {
     inter as f32 / union as f32
 }
 
+pub fn hindi_query_context(query_artist: &str, query_title: &str) -> bool {
+    contains_devanagari(query_artist) || contains_devanagari(query_title)
+}
+
+/// Common Roman Hindi spelling variants for LRCLIB search and match scoring.
+pub fn hindi_roman_spelling_variants(roman: &str) -> Vec<String> {
+    let base = roman.trim().to_lowercase();
+    if base.is_empty() {
+        return Vec::new();
+    }
+    let mut out: HashSet<String> = HashSet::new();
+    out.insert(base.clone());
+    let rules: &[(&str, &str)] = &[
+        ("ee", "i"),
+        ("i", "ee"),
+        ("aa", "a"),
+        ("a", "aa"),
+        ("oo", "u"),
+        ("u", "oo"),
+        ("sh", "s"),
+        ("s", "sh"),
+        ("ph", "f"),
+        ("f", "ph"),
+        ("v", "w"),
+        ("w", "v"),
+        ("ch", "c"),
+        ("kh", "k"),
+    ];
+    for (from, to) in rules {
+        if base.contains(from) {
+            out.insert(base.replace(from, to));
+        }
+    }
+    if base.contains(' ') {
+        out.insert(base.replace(' ', ""));
+    }
+    out.into_iter().take(14).collect()
+}
+
+fn title_match_score(query_title: &str, found_title: &str) -> f32 {
+    let mut best = similarity(query_title, found_title);
+    let roman = romanize_for_matching(query_title);
+    if roman != query_title.to_lowercase() {
+        best = best.max(similarity(&roman, found_title));
+    }
+    for variant in hindi_roman_spelling_variants(&roman) {
+        best = best.max(similarity(&variant, found_title));
+    }
+    best
+}
+
+fn artist_match_score(query_artist: &str, found_artist: &str) -> f32 {
+    if query_artist.trim().is_empty() {
+        return 0.75;
+    }
+    let direct = similarity(query_artist, found_artist);
+    let primary = similarity(&primary_credit(query_artist), found_artist);
+    let mut best = direct.max(primary);
+    if contains_devanagari(query_artist) {
+        let roman = romanize_for_matching(query_artist);
+        best = best.max(similarity(&roman, found_artist));
+        for variant in hindi_roman_spelling_variants(&roman) {
+            best = best.max(similarity(&variant, found_artist));
+        }
+    }
+    best
+}
+
 pub fn validate_lrclib_match(
     query_artist: &str,
     query_title: &str,
     found_artist: &str,
     found_title: &str,
 ) -> bool {
-    let title_score = similarity(query_title, found_title);
-    let artist_score = if query_artist.trim().is_empty() {
-        0.75
+    score_lrclib_match(query_artist, query_title, found_artist, found_title).accepted
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchScores {
+    pub title_score: f32,
+    pub artist_score: f32,
+    pub accepted: bool,
+    pub reason: String,
+}
+
+pub fn score_lrclib_match(
+    query_artist: &str,
+    query_title: &str,
+    found_artist: &str,
+    found_title: &str,
+) -> MatchScores {
+    let title_score = title_match_score(query_title, found_title);
+    let artist_score = artist_match_score(query_artist, found_artist);
+    let hindi = hindi_query_context(query_artist, query_title);
+    let title_min = if hindi { 0.48 } else { 0.55 };
+    let artist_min = if hindi { 0.32 } else { 0.4 };
+    let accepted =
+        title_score >= title_min && (artist_score >= artist_min || title_score >= 0.82);
+    let reason = if accepted {
+        String::new()
     } else {
-        let direct = similarity(query_artist, found_artist);
-        let primary = similarity(&primary_credit(query_artist), found_artist);
-        direct.max(primary)
+        format!(
+            "lrclib_match title={title_score:.2} (min {title_min}) artist={artist_score:.2} (min {artist_min}) found={found_artist}/{found_title}"
+        )
     };
-    title_score >= 0.55 && (artist_score >= 0.4 || title_score >= 0.82)
+    MatchScores {
+        title_score,
+        artist_score,
+        accepted,
+        reason,
+    }
+}
+
+fn composer_mismatch_vocal_query(query_artist: &str, found_artist: &str) -> bool {
+    let q = query_artist.trim().to_lowercase();
+    let f = found_artist.trim().to_lowercase();
+    if q.is_empty() {
+        return false;
+    }
+    (q.contains("singh") || q.contains("nautiyal") || q.contains("arijit"))
+        && f == "mithoon"
+        && artist_match_score(query_artist, found_artist) < 0.35
+}
+
+/// Stricter than LRCLIB: performing artist must match when SMTC artist is known.
+pub fn score_provider_match(
+    query_artist: &str,
+    query_titles: &[&str],
+    found_artist: &str,
+    found_title: &str,
+) -> MatchScores {
+    let title_score = query_titles
+        .iter()
+        .map(|t| title_match_score(t, found_title))
+        .fold(0.0f32, f32::max);
+    let mut artist_score = artist_match_score(query_artist, found_artist);
+    for segment in found_artist.split(&[',', '&', ';'][..]) {
+        artist_score = artist_score.max(artist_match_score(query_artist, segment.trim()));
+    }
+    let hindi = query_titles
+        .iter()
+        .any(|t| hindi_query_context(query_artist, t));
+    let title_min = if hindi { 0.48 } else { 0.55 };
+    let artist_min = if hindi { 0.32 } else { 0.4 };
+    let artist_known = !query_artist.trim().is_empty();
+    let artist_ok = !artist_known
+        || artist_score >= artist_min
+        || (title_score >= 0.92 && artist_score >= 0.22);
+    let title_ok = title_score >= title_min;
+    let title_exact = query_titles.iter().any(|qt| {
+        normalize_for_match(qt) == normalize_for_match(found_title)
+            || similarity(qt, found_title) >= 0.95
+    });
+    let bollywood_metadata_ok = hindi && title_exact && title_score >= 0.9;
+    let title_only_ok = title_exact
+        && title_score >= 0.95
+        && !composer_mismatch_vocal_query(query_artist, found_artist);
+    let accepted = title_ok && (artist_ok || bollywood_metadata_ok || title_only_ok);
+    let reason = if accepted {
+        String::new()
+    } else {
+        format!(
+            "provider_match title={title_score:.2} (min {title_min}) artist={artist_score:.2} (min {artist_min}) bollywood_ok={bollywood_metadata_ok} found={found_artist}/{found_title}"
+        )
+    };
+    MatchScores {
+        title_score,
+        artist_score,
+        accepted,
+        reason,
+    }
+}
+
+pub fn validate_provider_match(
+    query_artist: &str,
+    query_titles: &[&str],
+    found_artist: &str,
+    found_title: &str,
+) -> bool {
+    score_provider_match(query_artist, query_titles, found_artist, found_title).accepted
 }
 
 /// First billed name when SMTC/YouTube uses "A, B - Title".
@@ -528,6 +877,15 @@ pub fn is_untrusted_media_artist(artist: &str) -> bool {
         return true;
     }
     if lower.contains("records") && !a.contains(',') && a.len() < 28 {
+        return true;
+    }
+    if lower.contains("music india")
+        || lower.contains("t-series")
+        || lower.contains("t series")
+        || lower.contains("zee music")
+        || lower.contains("tips music")
+        || lower.contains("saregama")
+    {
         return true;
     }
     // Typical YouTube channel id: no spaces, mixed case (ShawnMendesVEVO).
@@ -603,10 +961,11 @@ pub fn normalize_lrclib_query(artist: &str, title: &str) -> (String, String) {
 }
 
 pub fn lookup_variants(artist: &str, raw_title: &str) -> Vec<(String, String)> {
+    let meta = resolve_track_metadata(artist, raw_title, "");
     let cleaned_full = clean_video_title(raw_title);
-    let (artist, title) = resolve_lrclib_metadata(artist, raw_title);
-    let short_title =
-        primary_song_title_from_head(&extract_primary_streaming_head(raw_title));
+    let artist = meta.artist.clone();
+    let title = meta.title.clone();
+    let short_title = meta.canonical_title.clone();
     let mut out = Vec::new();
     let mut seen = HashSet::new();
 
@@ -627,14 +986,18 @@ pub fn lookup_variants(artist: &str, raw_title: &str) -> Vec<(String, String)> {
         }
     };
 
+    if !short_title.is_empty() {
+        push_pair(artist.clone(), short_title.clone(), false, false);
+    }
     push_pair(artist.clone(), title.clone(), false, false);
 
     if !short_title.is_empty() {
         push_pair(String::new(), short_title.clone(), false, false);
-        push_pair(artist.clone(), short_title.clone(), false, false);
-        for credit in pipe_credit_names(raw_title) {
-            for name in expand_playback_credit(&credit) {
-                push_pair(name, short_title.clone(), false, false);
+        if is_untrusted_media_artist(&artist) || artist.trim().is_empty() {
+            for credit in pipe_credit_names(raw_title) {
+                for name in expand_playback_credit(&credit) {
+                    push_pair(name, short_title.clone(), false, false);
+                }
             }
         }
     }
@@ -691,7 +1054,51 @@ pub fn lookup_variants(artist: &str, raw_title: &str) -> Vec<(String, String)> {
         }
     }
 
+    prepend_hindi_lookup_variants(&artist, &title, &mut out);
+
     out
+}
+
+fn prepend_hindi_lookup_variants(artist: &str, title: &str, out: &mut Vec<(String, String)>) {
+    if !hindi_query_context(artist, title) {
+        return;
+    }
+    let title_roman = romanize_for_matching(title);
+    let mut priority_keys: HashSet<String> = HashSet::new();
+    let mut register = |a: &str, t: &str| {
+        priority_keys.insert(format!(
+            "{}::{}",
+            normalize_for_match(a),
+            normalize_for_match(t)
+        ));
+    };
+    register(artist, &title_roman);
+    register("", &title_roman);
+    for spell in hindi_roman_spelling_variants(&title_roman) {
+        register(artist, &spell);
+    }
+
+    let mut front = Vec::new();
+    let mut back = Vec::new();
+    for pair in out.drain(..) {
+        let key = format!(
+            "{}::{}",
+            normalize_for_match(&pair.0),
+            normalize_for_match(&pair.1)
+        );
+        if priority_keys.contains(&key) {
+            front.push(pair);
+        } else {
+            back.push(pair);
+        }
+    }
+    front.append(&mut back);
+    *out = front;
+    out.sort_by(|(_, ta), (_, tb)| {
+        let da = contains_devanagari(ta);
+        let db = contains_devanagari(tb);
+        da.cmp(&db)
+    });
 }
 
 /// e.g. `Harleys in Hawaii` → `Harley's in Hawaii` for LRCLIB title spelling.
@@ -844,19 +1251,59 @@ pub fn build_document(
     track_key: String,
     synced: bool,
 ) -> Result<LyricsResult, LyricsError> {
+    build_document_inner(raw, source, track_key, synced, true)
+}
+
+/// Like [`build_document`] but keeps Devanagari and other scripts from provider payloads.
+pub fn build_document_no_romanize(
+    raw: Vec<(u64, String)>,
+    source: &str,
+    track_key: String,
+    synced: bool,
+) -> Result<LyricsResult, LyricsError> {
+    build_document_inner(raw, source, track_key, synced, false)
+}
+
+fn build_document_inner(
+    raw: Vec<(u64, String)>,
+    source: &str,
+    track_key: String,
+    synced: bool,
+    romanize_hindi: bool,
+) -> Result<LyricsResult, LyricsError> {
     let mut lines = enrich_lines(raw);
-    for line in &mut lines {
-        if contains_devanagari(&line.text) {
-            line.text = romanize_display_text(&line.text);
-        }
-        for w in &mut line.words {
-            if contains_devanagari(&w.text) {
-                w.text = romanize_display_text(&w.text);
+    if romanize_hindi {
+        for line in &mut lines {
+            if contains_devanagari(&line.text) {
+                line.text = romanize_display_text(&line.text);
+            }
+            for w in &mut line.words {
+                if contains_devanagari(&w.text) {
+                    w.text = romanize_display_text(&w.text);
+                }
             }
         }
     }
     if lines.is_empty() {
         return Err(LyricsError::NotFound("no lines after enrichment".into()));
+    }
+    Ok(LyricsResult {
+        lines,
+        source: source.to_string(),
+        track_key,
+        synced,
+    })
+}
+
+/// Build a document from provider-native timed lines without altering script.
+pub fn build_document_from_timed_lines(
+    lines: Vec<LyricLine>,
+    source: &str,
+    track_key: String,
+    synced: bool,
+) -> Result<LyricsResult, LyricsError> {
+    if lines.is_empty() {
+        return Err(LyricsError::NotFound("no timed lines".into()));
     }
     Ok(LyricsResult {
         lines,
@@ -1035,7 +1482,7 @@ fn lrclib_get(
     }
     if status.as_u16() == 400 {
         return Err(LyricsError::NotFound(
-            "LRCLIB get rejected query (400 bad request)".into(),
+            "LRCLIB get invalid query parameters".into(),
         ));
     }
     if status.as_u16() == 429 {
@@ -1137,7 +1584,7 @@ fn lrclib_search(
     let search_status = response.status().as_u16();
     if search_status == 400 {
         return Err(LyricsError::NotFound(
-            "LRCLIB search rejected query (400)".into(),
+            "LRCLIB search invalid query parameters".into(),
         ));
     }
     if is_transient_http(search_status) || search_status == 500 {
@@ -1344,6 +1791,7 @@ pub fn fetch_lyrics_for_track(
     cache_dir: &Path,
     artist: &str,
     title: &str,
+    album: &str,
     duration_ms: Option<u64>,
     bypass_negative_cache: bool,
     request_id: u64,
@@ -1353,6 +1801,7 @@ pub fn fetch_lyrics_for_track(
         cache_dir,
         artist,
         title,
+        album,
         duration_ms,
         bypass_negative_cache,
         request_id,
@@ -1364,6 +1813,7 @@ pub fn fetch_lyrics_for_track_with_client(
     cache_dir: &Path,
     artist: &str,
     title: &str,
+    album: &str,
     duration_ms: Option<u64>,
     bypass_negative_cache: bool,
     request_id: u64,
@@ -1375,7 +1825,9 @@ pub fn fetch_lyrics_for_track_with_client(
     fs::create_dir_all(cache_dir)?;
     let raw_artist = artist.trim();
     let raw_title = title.trim();
-    let (artist, title) = resolve_lrclib_metadata(raw_artist, raw_title);
+    let meta = resolve_track_metadata(raw_artist, raw_title, album);
+    let artist = meta.artist.clone();
+    let title = meta.title.clone();
     let key = track_key(&artist, &title, duration_ms);
 
     let mut diag = LyricsFetchDiagnostics {
@@ -1444,8 +1896,12 @@ pub fn fetch_lyrics_for_track_with_client(
         set_lyrics_diag(diag.clone());
     };
 
-    const MAX_GET_VARIANTS: usize = 4;
-    for (idx, (a, t)) in variants.iter().take(MAX_GET_VARIANTS).enumerate() {
+    let max_get_variants: usize = if contains_devanagari(raw_artist) || contains_devanagari(raw_title) {
+        6
+    } else {
+        4
+    };
+    for (idx, (a, t)) in variants.iter().take(max_get_variants).enumerate() {
         poll_fetch_lifecycle(request_id, deadline)?;
         if rate_limited {
             break;
@@ -1562,6 +2018,39 @@ pub fn fetch_lyrics_for_track_with_client(
         }
     }
 
+    let query = crate::lyrics_engine::TrackQuery {
+        raw_artist: meta.raw_artist.clone(),
+        raw_title: meta.raw_title.clone(),
+        normalized_artist: artist.clone(),
+        normalized_title: title.clone(),
+        canonical_title: meta.canonical_title.clone(),
+        album: meta.album.clone(),
+        duration_ms,
+        track_key: key.clone(),
+    };
+    let try_alternates = {
+        #[cfg(test)]
+        {
+            std::env::var("CONSTELLATION_TEST_ALT_PROVIDERS").is_ok()
+        }
+        #[cfg(not(test))]
+        {
+            true
+        }
+    };
+    if try_alternates {
+        if let Some(success) = crate::lyrics_engine::fetch_alternate_providers(
+            client,
+            &query,
+            request_id,
+            deadline,
+            &mut diag,
+        )? {
+            cache_success(&mut diag, success.result.clone());
+            return Ok(success.result);
+        }
+    }
+
     if let Some(e) = last_retryable_err {
         if let Some(stale) = stale_on_fail {
             lyrics_log("retryable failure — serving last cached lyrics for this track");
@@ -1602,7 +2091,7 @@ pub fn fetch_lyrics_for_track_with_client(
     diag.last_error_class = "not_found".into();
     set_lyrics_diag(diag);
     Err(LyricsError::NotFound(
-        "LRCLIB has no matching lyrics for this track".into(),
+        "No matching lyrics found from configured providers".into(),
     ))
 }
 
@@ -1681,6 +2170,27 @@ mod sync_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kesariya_8k_sony_music_title_resolves_for_lrcmux() {
+        let raw = "Kesariya 8K/4K Music Video | Arijit Singh | Ranbir Kapoor | Alia Bhatt | Pritam | Brahmāstra";
+        let meta = resolve_track_metadata("Sony Music India", raw, "");
+        assert_eq!(meta.canonical_title, "Kesariya");
+        assert_eq!(meta.title, "Kesariya");
+        assert_eq!(meta.artist, "Arijit Singh");
+        assert!(
+            meta.album.to_lowercase().contains("brahm"),
+            "album={}",
+            meta.album
+        );
+        let scores = score_provider_match(
+            &meta.artist,
+            &[meta.canonical_title.as_str()],
+            "Pritam",
+            "Kesariya",
+        );
+        assert!(scores.accepted, "{}", scores.reason);
+    }
 
     #[test]
     fn kesariya_pipe_title_normalizes_for_lrclib() {
@@ -1796,6 +2306,80 @@ mod tests {
             "expected romanized title variant, got {:?}",
             v
         );
+        assert!(
+            !contains_devanagari(&v[0].1),
+            "romanized variant should sort before Devanagari, got {:?}",
+            v[0]
+        );
+    }
+
+    #[test]
+    fn hindi_roman_spelling_variants_alternate_vowels() {
+        let v = hindi_roman_spelling_variants("tum hi ho");
+        assert!(v.iter().any(|s| s.contains("tum")));
+        assert!(v.len() >= 2);
+    }
+
+    #[test]
+    fn tum_hi_ho_youtube_pipe_title_extracts_canonical_fields() {
+        let raw = "Tum Hi Ho Song Aashiqui 2 | Music By Mithoon | Aditya Roy Kapur, Shraddha Kapoor";
+        let meta = resolve_track_metadata("Arijit Singh", raw, "");
+        assert_eq!(meta.canonical_title, "Tum Hi Ho");
+        assert_eq!(meta.title, "Tum Hi Ho");
+        assert_eq!(meta.album, "Aashiqui 2");
+        let variants = lookup_variants("Arijit Singh", raw);
+        assert!(
+            variants.iter().any(|(a, t)| a == "Arijit Singh" && t == "Tum Hi Ho"),
+            "variants={variants:?}"
+        );
+        assert!(
+            !variants.iter().any(|(a, _)| a == "Mithoon"),
+            "composer must not be used as artist variant when SMTC artist is trusted"
+        );
+    }
+
+    #[test]
+    fn provider_match_rejects_wrong_performer_same_title() {
+        let scores = score_provider_match(
+            "Arijit Singh",
+            &["Tum Hi Ho"],
+            "Mithoon",
+            "Tum Hi Ho",
+        );
+        assert!(!scores.accepted, "{}", scores.reason);
+        let ok = score_provider_match(
+            "Arijit Singh",
+            &["Tum Hi Ho"],
+            "Arijit Singh",
+            "Tum Hi Ho",
+        );
+        assert!(ok.accepted, "{}", ok.reason);
+    }
+
+    #[test]
+    fn validate_hindi_accepts_lrclib_roman_spelling() {
+        assert!(validate_lrclib_match(
+            "Arijit Singh",
+            "तुम ही हो",
+            "Arijit Singh",
+            "Tum Hi Ho",
+        ));
+        assert!(validate_lrclib_match(
+            "Arijit Singh",
+            "tum hi ho",
+            "Arijit Singh",
+            "Tum Hi Ho",
+        ));
+    }
+
+    #[test]
+    fn validate_hindi_rejects_unrelated_track() {
+        assert!(!validate_lrclib_match(
+            "Arijit Singh",
+            "तुम ही हो",
+            "Arijit Singh",
+            "Kesariya",
+        ));
     }
 
     #[test]
@@ -1983,6 +2567,7 @@ mod fetch_http_tests {
                 dir.path(),
                 "Katy Perry",
                 "Harleys in Hawaii",
+                "",
                 Some(203_000),
                 true,
                 0,
@@ -2014,6 +2599,7 @@ mod fetch_http_tests {
                 dir.path(),
                 "Katy Perry",
                 "Harleys In Hawaii (Official)",
+                "",
                 Some(204_000),
                 true,
                 0,
@@ -2044,6 +2630,7 @@ mod fetch_http_tests {
                 dir.path(),
                 "Katy Perry",
                 "Harleys in Hawaii",
+                "",
                 None,
                 true,
                 0,
@@ -2075,6 +2662,7 @@ mod fetch_http_tests {
                 dir.path(),
                 "Katy Perry",
                 "Unique Title For Parse Test",
+                "",
                 None,
                 true,
                 0,
@@ -2082,6 +2670,38 @@ mod fetch_http_tests {
             )
             .expect_err("malformed JSON should fail parse");
             assert!(matches!(err, LyricsError::Parse(_)));
+        });
+    }
+
+    #[test]
+    fn hindi_devanagari_search_success_mock() {
+        with_mock_server(|server| {
+            let _get = server
+                .mock("GET", Matcher::Regex(r".*/api/get.*".to_string()))
+                .with_status(404)
+                .create();
+            let search_body = r#"[{"trackName":"Tum Hi Ho","artistName":"Arijit Singh","syncedLyrics":"[00:10.00]Tum hi ho","duration":285.0}]"#;
+            let _search = server
+                .mock("GET", Matcher::Regex(r".*/api/search.*".to_string()))
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body(search_body)
+                .create();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let client = http_client().expect("client");
+            let result = fetch_lyrics_for_track_with_client(
+                dir.path(),
+                "Arijit Singh",
+                "तुम ही हो",
+                "",
+                Some(285_000),
+                true,
+                0,
+                &client,
+            )
+            .expect("hindi devanagari title should match roman LRCLIB hit");
+            assert!(!result.lines.is_empty());
+            assert!(result.lines[0].text.to_lowercase().contains("tum"));
         });
     }
 
@@ -2102,6 +2722,7 @@ mod fetch_http_tests {
                 dir.path(),
                 "Fifth Harmony",
                 "Worth It",
+                "",
                 Some(401_000),
                 true,
                 0,
@@ -2132,6 +2753,7 @@ mod fetch_http_tests {
                 dir.path(),
                 "Taylor Swift",
                 "Love Story",
+                "",
                 Some(402_000),
                 true,
                 0,

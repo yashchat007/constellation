@@ -12,10 +12,13 @@ export type LyricsErrorKind =
 
 export function classifyLyricsError(raw: string): LyricsErrorKind {
   const msg = raw.toLowerCase();
-  if (msg.includes("not found") || msg.includes("no matching lyrics") || msg.includes("cached miss")) {
+  if (msg.includes("not found") || msg.includes("no matching lyrics") || msg.includes("cached miss") || msg.includes("validation rejected")) {
     return "not_found";
   }
-  if (msg.includes("400") || msg.includes("bad request") || msg.includes("rejected query")) {
+  if (
+    msg.includes("invalid query parameters") ||
+    msg.includes("rejected query")
+  ) {
     return "rejected";
   }
   if (msg.includes("429") || msg.includes("rate limit")) {

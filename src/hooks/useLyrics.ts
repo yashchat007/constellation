@@ -34,6 +34,47 @@ function invokeWithTimeout<T>(
   ]);
 }
 
+export type LyricsFetchSkipReason = "fetch" | "skip_up_to_date" | "skip_in_flight";
+
+/** Pure guard for when the lyrics loader should skip starting a new invoke. */
+export function resolveLyricsFetchAction(input: {
+  trackKey: string;
+  lastLoadedKey: string | null;
+  lyricsRetryNonce: number;
+  lastRetryHandled: number;
+  inFlightKey: string | null;
+  loadedLyricsTrackKey: string | null;
+}): LyricsFetchSkipReason {
+  const {
+    trackKey,
+    lastLoadedKey,
+    lyricsRetryNonce,
+    lastRetryHandled,
+    inFlightKey,
+    loadedLyricsTrackKey,
+  } = input;
+
+  const lyricsMatchTrack =
+    loadedLyricsTrackKey !== null && loadedLyricsTrackKey === trackKey;
+
+  if (
+    trackKey === lastLoadedKey &&
+    lyricsRetryNonce === lastRetryHandled &&
+    lyricsMatchTrack
+  ) {
+    return "skip_up_to_date";
+  }
+
+  if (
+    inFlightKey === trackKey &&
+    lyricsRetryNonce === lastRetryHandled
+  ) {
+    return "skip_in_flight";
+  }
+
+  return "fetch";
+}
+
 export function trackIdentity(np: NowPlaying | null): string | null {
   if (np?.trackKey) {
     return np.trackKey;
@@ -68,6 +109,7 @@ export function useLyricsLoader() {
   const title = useAppStore((s) => s.nowPlaying?.title);
   const artist = useAppStore((s) => s.nowPlaying?.artist);
   const durationMs = useAppStore((s) => s.nowPlaying?.durationMs);
+  const album = useAppStore((s) => s.nowPlaying?.album);
   const lyricsRetryNonce = useAppStore((s) => s.lyricsRetryNonce);
   const setLyrics = useAppStore((s) => s.setLyrics);
   const setLyricsError = useAppStore((s) => s.setLyricsError);
@@ -90,17 +132,17 @@ export function useLyricsLoader() {
       return;
     }
 
-    if (
-      key === lastLoadedKey.current &&
-      lyricsRetryNonce === lastRetryHandled.current
-    ) {
-      return;
-    }
-
-    if (
-      inFlightKey.current === key &&
-      lyricsRetryNonce === lastRetryHandled.current
-    ) {
+    const loadedLyricsTrackKey =
+      useAppStore.getState().lyrics?.trackKey ?? null;
+    const action = resolveLyricsFetchAction({
+      trackKey: key,
+      lastLoadedKey: lastLoadedKey.current,
+      lyricsRetryNonce,
+      lastRetryHandled: lastRetryHandled.current,
+      inFlightKey: inFlightKey.current,
+      loadedLyricsTrackKey,
+    });
+    if (action !== "fetch") {
       return;
     }
 
@@ -135,6 +177,7 @@ export function useLyricsLoader() {
             {
               artist: artistStr,
               title: titleStr,
+              album: album ?? "",
               durationMs,
               bypassNegativeCache,
               requestId: generation,
@@ -183,6 +226,8 @@ export function useLyricsLoader() {
         setLyricsError(formatted.message);
         if (formatted.kind === "not_found") {
           lastLoadedKey.current = key;
+        } else {
+          lastLoadedKey.current = null;
         }
       } finally {
         if (inFlightKey.current === key) {
@@ -198,6 +243,7 @@ export function useLyricsLoader() {
     title,
     artist,
     durationMs,
+    album,
     lyricsRetryNonce,
     setGraph,
     setLyrics,

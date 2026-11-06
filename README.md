@@ -1,48 +1,110 @@
-# Constellation (Windows)
+# Constellation
 
-Free, open-source mini player with **Constellation** synced lyrics — reads **Windows Now Playing (SMTC)** from Spotify, browsers, and other apps.
+**Actively developed** — a free, open-source **Windows** desktop mini player with a **constellation-style** synced lyrics visualizer. It reads **Windows System Media Transport Controls (SMTC)** “now playing” from Spotify, browsers, and other apps, and fetches timed lyrics from public providers (no API keys required for normal use).
 
-## Stack
+## Features
 
-- Tauri 2 + Rust (SMTC, LRCLIB lyrics cache)
-- React + TypeScript + Canvas 2D
+- **Now playing** from SMTC: title, artist, album, duration, position, album art (with sensible rejection of junk thumbnails)
+- **Transport**: play/pause, next, previous, seek (best effort per media app)
+- **Lyrics**: multi-provider chain (LRCLIB → [lrcmux](https://api.lrcmux.dev) → Better Lyrics → optional Karalyr base), Hindi-aware title/artist normalization, local `.lrc` import
+- **Visualizer**: Canvas 2D “constellation” graph with word-level sync when available; **audio-reactive** mood via WASAPI loopback capture
+- **Views**: Lyrics view and **Classic** view
+- **Settings** (persisted): lyric offset, text size, accent color, always-on-top, and related options  
+  **Theme**: black background with **cyan/blue** accents (by design)
 
-## Prerequisites
+## Technology stack
 
-- [Node.js](https://nodejs.org/) 20+
-- [Rust](https://rustup.rs/) (MSVC toolchain)
-- WebView2 (included on Windows 11)
+| Layer | Tech |
+|--------|------|
+| Desktop shell | **Tauri 2** (Rust, WebView2) |
+| Frontend | **React 19**, **TypeScript**, **Vite 8**, **Zustand** |
+| Windows media | SMTC (`windows` crate — `Media_Control`) |
+| Audio features | WASAPI loopback (`wasapi`), FFT / feature extraction |
+| Lyrics | `reqwest` + LRCLIB-compatible APIs, on-disk cache under app data |
 
-## Develop
+## Architecture (high level)
 
-Close and reopen your terminal after installing Rust (or use the npm script below, which refreshes PATH on Windows).
+```
+SMTC (now playing) ──► Rust backend ──► Tauri commands ──► React UI
+                              │
+WASAPI loopback (mix) ──► audio features ──► mood / motion for constellation
+                              │
+Lyrics providers ──► match + parse (LRC / TTML / JSON) ──► unified line/word model ──► Canvas
+```
+
+Production builds embed the **static** `dist/` output from Vite; **no browser** and **no dev server** are required at runtime.
+
+## Prerequisites (development)
+
+- **Node.js** 20+
+- **Rust** stable ( MSVC toolchain on Windows )
+- **WebView2** (bundled on Windows 11; [ Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) on older Windows if needed)
+
+## Development setup
 
 ```powershell
-cd c:\Users\Yash\Desktop\Constellation
+cd path\to\Constellation
 npm install
 npm run tauri dev
 ```
 
-## Build
+`tauri dev` runs Vite on `http://localhost:1420` and connects the WebView for hot reload.
+
+## Tests and checks
 
 ```powershell
+npm test
+npm run build
+cd src-tauri
+cargo test --lib
+cargo check
+cargo build --release
+```
+
+## Production build (Windows installers)
+
+From the repo root:
+
+```powershell
+npm install
 npm run tauri build
 ```
 
-Installer output: `src-tauri\target\release\bundle\`
+Artifacts (typical locations):
 
-## Features (MVP)
+- **NSIS**: `src-tauri\target\release\bundle\nsis\Constellation_0.1.0_x64-setup.exe`
+- **MSI** (WiX): `src-tauri\target\release\bundle\msi\Constellation_0.1.0_x64_en-US.msi`
 
-- System now playing metadata + album art (SMTC)
-- Play / pause / skip (best effort per app)
-- LRCLIB synced lyrics + local `.lrc` import
-- Constellation word graph with active-word highlight
-- Settings: lyric offset, text size, accent color, always on top
+Exact filenames may vary slightly with version bumps. Installers are generated under `src-tauri\target\release\bundle\` and are **gitignored** — build locally for release.
 
-## Lyrics
+### Runtime expectations
 
-Primary source: [LRCLIB](https://lrclib.net/) (no API key). If a track is missing, use **Settings → Import .lrc**.
+- Network access for lyrics providers (HTTPS).
+- No paid API keys required for default providers.
+- Optional env overrides (advanced): `CONSTELLATION_LRCLIB_BASE`, `CONSTELLATION_LRCMUX_BASE`, `CONSTELLATION_KARALYR_BASE`, `CONSTELLATION_LOG` (see source).
+
+## Lyrics providers
+
+| Order | Provider | Notes |
+|------|-----------|--------|
+| 1 | [LRCLIB](https://lrclib.net) | Primary; can see 5xx outages |
+| 2 | lrcmux | `https://api.lrcmux.dev` by default |
+| 3 | [Better Lyrics](https://docs.betterlyrics.org/) | TTML when cached |
+| 4 | Karalyr | Optional base URL |
+
+See **`LYRICS_PROVIDER_BENCHMARK.md`** for a live-probe style matrix (informational; re-run probes on your network as needed).
+
+## Known limitations
+
+- **SMTC** coverage depends on each media app exposing session metadata.
+- **Lyrics** catalog gaps and provider outages can still cause misses; use **Retry** or **Import .lrc**.
+- Hindi tracks with noisy YouTube-style titles rely on title/artist heuristics; edge cases may need a manual `.lrc`.
+- **Audio reactive** capture uses system mix loopback; behavior varies by driver and exclusive-mode apps.
+
+## Repository
+
+**https://github.com/yashchat007/constellation**
 
 ## License
 
-Personal project — add a license if you publish.
+Add a `LICENSE` file when you want a formal open-source terms; the project is intended as an **open portfolio** piece.

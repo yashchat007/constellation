@@ -175,6 +175,24 @@ export function DevDiagnosticsPanel() {
                 ? String(lyricsDiag.lastRejectionReason ?? "—")
                 : "—"}
             </dd>
+            <dt>Provider</dt>
+            <dd>
+              {lyricsDiag
+                ? `${String(lyricsDiag.currentProvider ?? "—")} → ${String(lyricsDiag.finalProvider ?? "—")}`
+                : "—"}
+            </dd>
+            <dt>Fallback / format</dt>
+            <dd>
+              {lyricsDiag
+                ? `${String(lyricsDiag.fallbackReason ?? "—")} · ${String(lyricsDiag.lyricsFormat ?? "—")} · ${String(lyricsDiag.timingQuality ?? "—")}`
+                : "—"}
+            </dd>
+            <dt>Provider ms</dt>
+            <dd>
+              {lyricsDiag && lyricsDiag.providerQueryMs != null
+                ? String(lyricsDiag.providerQueryMs)
+                : "—"}
+            </dd>
             <dt>Roman sample</dt>
             <dd>{lyricsDiag ? String(lyricsDiag.transliterationSample ?? "—") : "—"}</dd>
           </dl>

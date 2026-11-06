@@ -10,7 +10,6 @@ export function MiniPlayer() {
   const nowPlaying = useAppStore((s) => s.nowPlaying);
   const settings = useAppStore((s) => s.settings);
   const patchSettings = useAppStore((s) => s.patchSettings);
-  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const audioCaptureActive = useAppStore((s) => s.audioCaptureActive);
 
   const title = nowPlaying?.title?.trim();
@@ -81,13 +80,6 @@ export function MiniPlayer() {
                 : "Constellation"}
             </button>
           )}
-          <button
-            type="button"
-            className="pill ghost"
-            onClick={() => setSettingsOpen(true)}
-          >
-            Settings
-          </button>
         </div>
       </div>
 

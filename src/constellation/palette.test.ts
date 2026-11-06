@@ -7,7 +7,6 @@ import {
   contrastOnDarkBackground,
   isLikelyValidArtworkDataUrl,
   isPlausibleArtworkDimensions,
-  isRedFamilyHue,
   lerpOklabHex,
   moodPaletteForCategory,
   NEUTRAL_FALLBACK_PALETTE,
@@ -57,17 +56,18 @@ describe("buildSongPaletteFromSwatches", () => {
 });
 
 describe("artwork pixel extraction", () => {
-  it("maps red-dominant pixels to red-family accents", () => {
+  it("maps artwork accents into cyan-blue brand range", () => {
     const palette = buildSongPaletteFromPixelData(solidColorPixelGrid(210, 42, 48));
-    expect(isRedFamilyHue(paletteHueDegrees(palette.primary))).toBe(true);
+    const hue = paletteHueDegrees(palette.primary);
+    expect(hue).toBeGreaterThan(160);
+    expect(hue).toBeLessThan(230);
   });
 
-  it("maps purple-dominant pixels to purple-family accents", () => {
+  it("maps purple-dominant pixels into blue-cyan accents", () => {
     const palette = buildSongPaletteFromPixelData(solidColorPixelGrid(140, 52, 210));
     const hex = palette.primary.replace("#", "");
-    const r = parseInt(hex.slice(0, 2), 16);
     const b = parseInt(hex.slice(4, 6), 16);
-    expect(b).toBeGreaterThan(r + 12);
+    expect(b).toBeGreaterThan(80);
   });
 
   it("separates red vs purple artwork palettes", () => {
@@ -134,7 +134,7 @@ describe("artwork validation", () => {
 });
 
 describe("missing artwork fallback", () => {
-  it("neutral fallback is not gold-tinted", () => {
-    expect(NEUTRAL_FALLBACK_PALETTE.primary.toLowerCase()).not.toMatch(/e5bd|f5d7|gold/i);
+  it("neutral fallback uses cyan brand accent", () => {
+    expect(NEUTRAL_FALLBACK_PALETTE.primary.toLowerCase()).toBe("#22d3ee");
   });
 });

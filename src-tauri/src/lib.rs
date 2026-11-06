@@ -1,6 +1,7 @@
 mod artwork_validate;
 mod audio;
 mod lyrics;
+mod lyrics_engine;
 mod settings;
 mod smtc;
 mod transliterate;
@@ -51,6 +52,7 @@ fn media_seek_position(position_ms: u64) -> Result<(), String> {
 async fn fetch_lyrics(
     artist: String,
     title: String,
+    album: Option<String>,
     duration_ms: Option<u64>,
     bypass_negative_cache: Option<bool>,
     request_id: Option<u64>,
@@ -63,11 +65,13 @@ async fn fetch_lyrics(
         .join("lyrics");
     let bypass = bypass_negative_cache.unwrap_or(false);
     let request_id = request_id.unwrap_or(0);
+    let album = album.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
         fetch_lyrics_for_track(
             &cache_dir,
             &artist,
             &title,
+            &album,
             duration_ms,
             bypass,
             request_id,

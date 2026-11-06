@@ -10,10 +10,10 @@ export type { ConstellationGraph, PhraseNode, PhraseWord };
 
 export const CONSTELLATION_THEME = {
   background: "#030303",
-  goldPrimary: "#E5BD65",
-  goldSecondary: "#8C713B",
-  goldHighlight: "#F5D77A",
-  textWarm: "#F5F0E5",
+  accentPrimary: "#22D3EE",
+  accentSecondary: "#0891B2",
+  accentHighlight: "#67E8F9",
+  textWarm: "#E8F4FF",
 } as const;
 
 export interface RenderTheme {

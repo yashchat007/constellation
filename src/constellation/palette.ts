@@ -1,4 +1,4 @@
-/** Perceptual colour helpers + artwork-derived palettes (no forced gold). */
+import { BRAND_ACCENT_HEX } from "../theme/tokens";
 
 /** Canvas stays deep black — never song-tinted full-screen. */
 export const CONSTELLATION_CANVAS_BG = "#030303";
@@ -16,18 +16,18 @@ export interface SongPalette {
   inactiveText: string;
 }
 
-/** Neutral fallback when artwork is missing — not gold. */
+/** Neutral fallback when artwork is missing — cyan brand. */
 export const NEUTRAL_FALLBACK_PALETTE: SongPalette = {
-  primary: "#B8B0A8",
-  secondary: "#6E6860",
-  highlight: "#E8E4DC",
-  text: "#F0EBE3",
-  ambient: "#8A8278",
-  node: "#C4BCB2",
-  connection: "#5A554E",
-  particle: "#A59E94",
+  primary: "#22D3EE",
+  secondary: "#0891B2",
+  highlight: "#67E8F9",
+  text: "#E8F4FF",
+  ambient: "#0E7490",
+  node: "#38BDF8",
+  connection: "#155E75",
+  particle: "#22D3EE",
   backgroundTint: CONSTELLATION_CANVAS_BG,
-  inactiveText: "#9A938A",
+  inactiveText: "#7A8FA8",
 };
 
 /** @deprecated use NEUTRAL_FALLBACK_PALETTE */
@@ -182,6 +182,27 @@ function clampChromaForDarkUi(
   return oklabToRgb(L, a, bb);
 }
 
+/** Keep song-specific variation while constraining hues to cyan/blue. */
+function alignSwatchToBrandHue(
+  r: number,
+  g: number,
+  b: number,
+): [number, number, number] {
+  let [L, a, bb] = rgbToOklab(r, g, b);
+  const angle = Math.atan2(bb, a);
+  const chroma = Math.hypot(a, bb);
+  const brandCenter = -2.35;
+  const spread = ((angle + Math.PI) / (Math.PI * 2)) * 0.42 - 0.21;
+  const nudged = brandCenter + spread;
+  const newChroma = Math.min(Math.max(chroma * 0.95, 0.05), 0.2);
+  L = Math.max(0.34, Math.min(0.8, L));
+  return oklabToRgb(
+    L,
+    Math.cos(nudged) * newChroma,
+    Math.sin(nudged) * newChroma,
+  );
+}
+
 function liftHighlight(r: number, g: number, b: number): [number, number, number] {
   let [L, a, bb] = rgbToOklab(r, g, b);
   L = Math.max(L, 0.78);
@@ -192,19 +213,30 @@ export function buildSongPaletteFromSwatches(
   swatchA: [number, number, number],
   swatchB: [number, number, number],
   swatchC: [number, number, number],
+  options?: { brandAlign?: boolean },
 ): SongPalette {
-  let [pr, pg, pb] = clampChromaForDarkUi(...swatchA, 0.42);
-  let [sr, sg, sb] = clampChromaForDarkUi(...swatchB, 0.32);
-  let [tr, tg, tb] = clampChromaForDarkUi(...swatchC, 0.34);
-  [pr, pg, pb] = saturate(pr, pg, pb, 1.48);
-  [sr, sg, sb] = saturate(sr, sg, sb, 1.28);
+  const brandAlign = options?.brandAlign ?? false;
+  let [pr, pg, pb] = brandAlign
+    ? alignSwatchToBrandHue(...swatchA)
+    : swatchA;
+  let [sr, sg, sb] = brandAlign
+    ? alignSwatchToBrandHue(...swatchB)
+    : swatchB;
+  let [tr, tg, tb] = brandAlign
+    ? alignSwatchToBrandHue(...swatchC)
+    : swatchC;
+  [pr, pg, pb] = clampChromaForDarkUi(pr, pg, pb, 0.42);
+  [sr, sg, sb] = clampChromaForDarkUi(sr, sg, sb, 0.32);
+  [tr, tg, tb] = clampChromaForDarkUi(tr, tg, tb, 0.34);
+  [pr, pg, pb] = saturate(pr, pg, pb, 1.18);
+  [sr, sg, sb] = saturate(sr, sg, sb, 1.1);
 
   const primary = rgbToHex(pr, pg, pb);
   const secondary = rgbToHex(sr * 0.82, sg * 0.82, sb * 0.82);
   const [hr, hg, hb] = liftHighlight(pr, pg, pb);
   const highlight = lerpOklabHex(
     rgbToHex(hr, hg, hb),
-    lerpOklabHex(primary, "#F5F0E8", 0.25),
+    lerpOklabHex(primary, "#E8F4FF", 0.25),
     0.55,
   );
   const node = lerpOklabHex(
@@ -214,7 +246,7 @@ export function buildSongPaletteFromSwatches(
   );
   const text = lerpOklabHex(
     lerpOklabHex(primary, "#FFFFFF", 0.72),
-    "#F5F0E8",
+    "#E8F4FF",
     0.35,
   );
 
@@ -266,6 +298,7 @@ export function buildSongPaletteFromPixelData(data: Uint8ClampedArray): SongPale
     [s0.r, s0.g, s0.b],
     [s1.r, s1.g, s1.b],
     [s2.r, s2.g, s2.b],
+    { brandAlign: true },
   );
 }
 
@@ -358,19 +391,20 @@ export function blendPalettes(
 }
 
 export function manualPaletteFromAccent(accent: string): SongPalette {
-  const [r, g, b] = parseHex(accent);
+  const base = accent || BRAND_ACCENT_HEX;
+  const [r, g, b] = parseHex(base);
   const secondary = rgbToHex(r * 0.55, g * 0.55, b * 0.55);
   return {
-    primary: accent,
+    primary: base,
     secondary,
-    highlight: lerpOklabHex(accent, "#F5F0E5", 0.35),
-    text: "#F0EBE3",
-    ambient: accent,
-    node: lerpOklabHex(accent, "#ffffff", 0.25),
+    highlight: lerpOklabHex(base, "#E8F4FF", 0.35),
+    text: "#E8F4FF",
+    ambient: base,
+    node: lerpOklabHex(base, "#ffffff", 0.25),
     connection: secondary,
-    particle: lerpOklabHex(accent, "#ffffff", 0.4),
+    particle: lerpOklabHex(base, "#ffffff", 0.4),
     backgroundTint: CONSTELLATION_CANVAS_BG,
-    inactiveText: lerpOklabHex(secondary, "#888880", 0.5),
+    inactiveText: lerpOklabHex(secondary, "#7A8FA8", 0.5),
   };
 }
 
@@ -389,44 +423,44 @@ const MOOD_SWATCH_TRIPLETS: Record<
   [[number, number, number], [number, number, number], [number, number, number]]
 > = {
   melancholic: [
-    [52, 68, 148],
-    [88, 96, 168],
-    [120, 130, 190],
+    [48, 88, 148],
+    [72, 108, 168],
+    [96, 128, 188],
   ],
   dreamy: [
-    [148, 118, 210],
-    [118, 148, 228],
-    [180, 160, 230],
+    [88, 128, 210],
+    [108, 148, 228],
+    [140, 168, 230],
   ],
   romantic: [
-    [210, 98, 128],
-    [228, 140, 150],
-    [240, 180, 170],
+    [72, 118, 188],
+    [96, 138, 210],
+    [120, 158, 220],
   ],
   energetic: [
-    [255, 72, 120],
-    [255, 120, 48],
-    [88, 160, 255],
+    [48, 160, 220],
+    [72, 188, 240],
+    [96, 148, 255],
   ],
   upbeat: [
-    [255, 148, 72],
-    [255, 96, 120],
-    [255, 196, 88],
+    [56, 172, 228],
+    [72, 196, 240],
+    [104, 160, 255],
   ],
   calm: [
-    [148, 158, 188],
-    [170, 140, 148],
-    [130, 150, 170],
+    [88, 128, 168],
+    [108, 148, 188],
+    [128, 158, 198],
   ],
   atmospheric: [
-    [72, 128, 148],
-    [108, 88, 148],
-    [140, 160, 180],
+    [64, 108, 148],
+    [88, 128, 168],
+    [112, 148, 188],
   ],
   neutral: [
-    [140, 132, 124],
-    [100, 108, 120],
-    [168, 158, 148],
+    [34, 211, 238],
+    [8, 145, 178],
+    [103, 232, 249],
   ],
 };
 
@@ -445,11 +479,11 @@ function seededSwatchesFromTrack(trackKey: string): [
   [number, number, number],
 ] {
   const h = hashTrackSeed(trackKey);
-  const hue = (h % 360) / 360;
+  const hue = 0.52 + ((h % 36) / 360);
   const mk = (offset: number): [number, number, number] => {
     const ang = (hue + offset) * Math.PI * 2;
-    const sat = 0.55 + ((h >> offset) & 7) / 28;
-    const lum = 0.42 + ((h >> (offset + 3)) & 7) / 22;
+    const sat = 0.48 + ((h >> offset) & 7) / 24;
+    const lum = 0.4 + ((h >> (offset + 3)) & 7) / 20;
     const c = (1 - Math.abs(2 * lum - 1)) * sat;
     const x = c * (1 - Math.abs(((ang / (Math.PI * 2)) * 6) % 2 - 1));
     const m = lum - c / 2;
@@ -480,7 +514,13 @@ function seededSwatchesFromTrack(trackKey: string): [
 }
 
 export function trackIdentityPalette(trackKey: string): SongPalette {
-  const [a, b, c] = seededSwatchesFromTrack(trackKey);
+  const h = hashTrackSeed(trackKey);
+  let [a, b, c] = seededSwatchesFromTrack(trackKey);
+  const twist = (v: number, bits: number) =>
+    Math.round(Math.max(40, Math.min(235, v + ((h >> bits) & 31) - 15)));
+  a = [twist(a[0], 0), twist(a[1], 4), twist(a[2], 8)];
+  b = [twist(b[0], 12), twist(b[1], 16), twist(b[2], 20)];
+  c = [twist(c[0], 24), twist(c[1], 28), twist(c[2], 3)];
   return buildSongPaletteFromSwatches(a, b, c);
 }
 

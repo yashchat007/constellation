@@ -33,7 +33,7 @@ export const INTERNAL_RUNTIME_DEFAULTS: Pick<
   | "autoMoodAdaptation"
   | "manualMoodOverride"
 > = {
-  accentColor: "#E5BD65",
+  accentColor: "#22D3EE",
   autoTint: true,
   themeTransitionMs: 1750,
   audioReactiveEnabled: true,
